@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Carousel</title>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+        }
+
+        a {
+            text-decoration: none;
+        }
+
+        area {
+            outline: none;
+        }
+
+        .carousel-wrapper {
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            margin: auto;
+            width: 1226px;
+            height: 460px;
+        }
+
+        .carousel {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        .slide {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            opacity: 0;
+            visibility: hidden;
+            -webkit-transition: all 0.5s;
+            -moz-transition: all 0.5s;
+            -o-transition: all 0.5s;
+            transition: all 0.5s;
+        }
+
+        .pager-ctrl {
+            z-index: 999;
+            position: absolute;
+            bottom: 10px;
+            right: 5%;
+        }
+
+        #icon-prev, #icon-next {
+            font-size: 40px;
+        }
+
+        .prev, .next {
+            position: absolute;
+            top: 45%;
+            height: 10%;
+            color: rgba(255, 69, 0, 0.4);
+            cursor: pointer;
+        }
+
+        .prev:hover, .next:hover {
+            color: #f5f5f5;
+            background-color: rgba(255, 69, 0, 0.5);
+        }
+
+        .prev {
+            left: 0;
+        }
+
+        .next {
+            right: 0;
+        }
+
+        .page-item {
+            width: 10px;
+            height: 10px;
+            -webkit-border-radius: 50%;
+            -moz-border-radius: 50%;
+            border-radius: 50%;
+            border-width: 1px;
+            border-style: solid;
+            border-color: rgba(255, 69, 0, 0.7);
+            display: inline-block;
+            cursor: pointer;
+        }
+
+        .vertical-line {
+            height: 0;
+            left: 0;
+            position: absolute;
+            top: 0;
+            border-left-style: dashed;
+            border-left-width: 1px;
+            border-left-color: rgba(255, 69, 0, 1);
+            text-align: right;
+            color: orangered;
+        }
+
+        .horizontal-line {
+            width: 0;
+            top: 0;
+            position: absolute;
+            left: 0;
+            border-top-style: dashed;
+            border-top-width: 1px;
+            border-top-color: rgba(255, 69, 0, 1);
+            text-align: center;
+            vertical-align: top;
+            color: orangered;
+        }
+    </style>
+</head>
+<body>
+<div class="carousel-wrapper">
+    <div class="carousel" onmousemove="getMousePosition()" onmouseleave="hideLine()">
+        <div class="slides">
+            <div class="slide">
+                <img src="images/2.jpg" usemap="#one">
+                <map name="one">
+                    <area shape="rect" coords="326, 316, 505, 360" href="http://www.baidu.com" target="_blank">
+                </map>
+            </div>
+            <div class="slide">
+                <img src="images/1.jpg" usemap="#two">
+                <map name="two">
+                    <area shape="rect" coords="310, 271, 492, 315" href="http://www.mi.com" target="_blank">
+                </map>
+            </div>
+            <div class="slide">
+                <img src="images/3.jpg" usemap="#three">
+                <map name="three">
+                    <area shape="rect" coords="353,296,559,344" href="http://www.mi.com" target="_blank">
+                </map>
+            </div>
+            <div class="slide">
+                <img src="images/4.jpg" usemap="#four">
+                <map name="four">
+                    <area shape="rect" coords="326,316,506,361" href="http://www.mi.com" target="_blank">
+                </map>
+            </div>
+            <div class="slide">
+                <img src="images/5.jpg" usemap="#five">
+                <map name="five">
+                    <area shape="rect" coords="326,316,506,361" href="http://www.mi.com" target="_blank">
+                </map>
+            </div>
+        </div>
+        <div class="pager-ctrl">
+            <div class="page-item"></div>
+            <div class="page-item"></div>
+            <div class="page-item"></div>
+            <div class="page-item"></div>
+            <div class="page-item"></div>
+        </div>
+        <div class="prev"><span id="icon-prev"><</span></div>
+        <div class="next"><span id="icon-next">></span></div>
+
+        <div class="vertical-line"></div>
+        <div class="horizontal-line"></div>
+    </div>
+</div>
+
+<script>
+
+    function hideLine() {
+        var vLine = document.querySelector('.vertical-line');
+        var hLine = document.querySelector('.horizontal-line');
+        vLine.style.visibility = 'hidden';
+        hLine.style.visibility = 'hidden';
+    }
+
+
+    //    http://stackoverflow.com/questions/7790725/javascript-track-mouse-position
+    function getMousePosition(event) {
+        var eventDoc, doc, body;
+
+        event = event || window.event; // IE-ism
+
+        // If pageX/Y aren't available and clientX/Y are,
+        // calculate pageX/Y - logic taken from jQuery.
+        // (This is to support old IE)
+        if (event.pageX == null && event.clientX != null) {
+            eventDoc = (event.target && event.target.ownerDocument) || document;
+            doc = eventDoc.documentElement;
+            body = eventDoc.body;
+
+            event.pageX = event.clientX +
+                    (doc && doc.scrollLeft || body && body.scrollLeft || 0) -
+                    (doc && doc.clientLeft || body && body.clientLeft || 0);
+            event.pageY = event.clientY +
+                    (doc && doc.scrollTop || body && body.scrollTop || 0) -
+                    (doc && doc.clientTop || body && body.clientTop || 0 );
+        }
+
+
+        var vLine = document.querySelector('.vertical-line');
+        var hLine = document.querySelector('.horizontal-line');
+        var carousel = document.querySelector('.carousel');
+        var top = carousel.offsetParent.offsetTop;
+        var left = carousel.offsetParent.offsetLeft;
+        vLine.style.visibility = 'visible';
+        hLine.style.visibility = 'visible';
+
+        vLine.style.height = (event.pageY - top) + 'px';
+        vLine.style.left = (event.pageX - left) + 'px';
+        vLine.style.lineHeight = (event.pageY - top) + 'px';
+        vLine.textContent = event.pageY - top;
+        hLine.style.width = (event.pageX - left) + 'px';
+        hLine.style.top = (event.pageY - top) + 'px';
+        hLine.textContent = (event.pageX - left);
+    }
+
+
+    var slides = document.querySelectorAll('.slide');
+    var pagers = document.querySelectorAll('.page-item');
+    var $intervalId = 'undefined';
+    var $currentSlideIndex = 0;
+
+    function hideSlide(current) {
+        slides[current].style.opacity = 0;
+        slides[current].style.visibility = 'hidden';
+        pagers[current].style.backgroundColor = 'rgba(255, 69, 0, 0)';
+    }
+
+    function showSlide(current) {
+        slides[current].style.opacity = 1;
+        slides[current].style.visibility = 'visible';
+        pagers[current].style.backgroundColor = 'rgba(255, 69, 0, 0.7)';
+    }
+
+    function switchSlide(current, dir) {
+        dir = (dir === -1) ? dir : 1;
+        hideSlide(current);
+        current = (current + dir);
+        if (current >= slides.length) current = 0;
+        if (current < 0) current = slides.length - 1;
+        showSlide(current);
+        return current;
+    }
+
+    function circularPlay() {
+        clearInterval($intervalId);
+        $intervalId = setInterval(function () {
+            $currentSlideIndex = switchSlide($currentSlideIndex);
+        }, 5000);
+    }
+
+    // initialize
+    showSlide($currentSlideIndex);
+    circularPlay();
+
+    // add click event handing method for each pager
+    for (var k = 0; k < pagers.length; ++k) {
+        (function (current) {
+            pagers[current].onclick = function () {
+                $currentSlideIndex = current;
+                for (var n = 0; n < pagers.length; ++n) {
+                    if (n !== current) {
+                        hideSlide(n);
+                    } else {
+                        showSlide(current);
+                    }
+                }
+                circularPlay();
+            }
+        })(k);
+    }
+
+    var prev = document.querySelector('.prev');
+    var next = document.querySelector('.next');
+
+    prev.onclick = function () {
+        $currentSlideIndex = switchSlide($currentSlideIndex, -1);
+        circularPlay();
+    };
+
+    next.onclick = function () {
+        $currentSlideIndex = switchSlide($currentSlideIndex);
+        circularPlay();
+    };
+</script>
+
+
+</body>
+</html>

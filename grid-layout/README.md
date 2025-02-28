@@ -39,3 +39,26 @@ This project serves as a reference implementation demonstrating that CSS Grid ca
 
 Grid shines when you need precise control over both rows and columns, but for a left-to-right
 layout with wrapping and variable item widths, Flexbox is more straightforward and better suited.
+
+## High-Level Steps to Modify the Chromium Engine
+
+1. **Locate the Grid Layout Code**:  
+    - The Grid layout logic resides in Blink, Chromium’s rendering engine.
+      Key files include third_party/blink/renderer/core/layout/layout_grid.cc and related headers.
+      You’d need to study how track sizing and item placement are currently handled.
+2. **Design a New Behavior**:  
+    - Propose a new CSS property or value, such as grid-template-columns: content-flow (hypothetical), that triggers this mode.
+    - In this mode, columns would be implicitly created, each sized to the content of its item, with wrapping triggered by container width constraints.
+3. **Modify Track Sizing**:  
+    - Alter the track sizing algorithm to compute each column’s width based on the min-content (or similar) size of the item placed in it,
+      rather than enforcing uniform widths.
+    - For each row, reset column definitions, allowing independent sizing per row.
+4. **Update Auto-Placement**:  
+    - Adjust the auto-placement logic to place items sequentially in a row until the container width is exceeded,
+      then start a new row. This could involve adapting some of Flexbox’s wrapping logic (found in layout_flexible_box.cc) into the Grid engine.
+5. **Test and Integrate**:  
+    - Ensure the modified engine passes existing Grid-related tests (found in Chromium’s test suites) and add new tests for your feature.
+    - Build and run your modified Chromium to verify the behavior.
+6. **Consider Standardization**:  
+    - If this is intended for broader use, propose the change to the CSS Grid specification via the W3C CSS Working Group.
+      Without standardization, your modification would only work in your custom Chromium build.

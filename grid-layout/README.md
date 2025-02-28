@@ -33,3 +33,9 @@ We developed a full-featured webpage layout that includes:
 - That Grid can handle both one-dimensional and two-dimensional layouts effectively
 
 This project serves as a reference implementation demonstrating that CSS Grid can indeed fulfill all layout requirements in modern web development.
+
+
+## The limitation
+
+Grid shines when you need precise control over both rows and columns, but for a left-to-right
+layout with wrapping and variable item widths, Flexbox is more straightforward and better suited.

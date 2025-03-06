@@ -3,62 +3,329 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Word Cloud</title>
+    <title>3D Word Cloud Visualization</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/three.module.js",
+          "three/addons/": "/"
+        }
+      }
+    </script>
     <style>
+    body { margin: 0 }
+    /*
         body {
             margin: 0;
             overflow: hidden;
             background-color: #000;
+            background: linear-gradient(135deg, #000000, #0a0a2a);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
         }
         canvas {
             display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1;
         }
         #info {
             position: absolute;
-            top: 10px;
+            top: 20px;
             width: 100%;
             text-align: center;
             color: white;
-            font-family: Arial, sans-serif;
+            font-size: 20px;
+            font-weight: bold;
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.8), 0 0 20px rgba(0, 128, 255, 0.5);
             pointer-events: none;
+            z-index: 10;
+            transition: all 0.3s ease;
         }
         #controls {
             position: absolute;
-            bottom: 10px;
-            left: 10px;
+            bottom: 20px;
+            left: 20px;
             color: white;
-            font-family: Arial, sans-serif;
-            background-color: rgba(0, 0, 0, 0.5);
-            padding: 10px;
-            border-radius: 5px;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.2), inset 0 0 10px rgba(0, 128, 255, 0.1);
+            z-index: 10;
+            backdrop-filter: blur(5px);
+            transition: all 0.3s ease;
         }
+        .control-row {
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+        }
+        .control-row:last-child {
+            margin-bottom: 0;
+        }
+        label {
+            margin-right: 12px;
+            font-weight: 500;
+            min-width: 80px;
+        }
+        input, button, select {
+            background-color: rgba(0, 0, 0, 0.6);
+            color: white;
+            border: 1px solid rgba(0, 255, 255, 0.5);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-family: inherit;
+            transition: all 0.2s ease;
+        }
+        input:focus, button:focus, select:focus {
+            outline: none;
+            border-color: rgba(0, 255, 255, 1);
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.5);
+        }
+        button {
+            cursor: pointer;
+            margin-right: 8px;
+            background: linear-gradient(to bottom, rgba(0, 128, 255, 0.3), rgba(0, 0, 0, 0.6));
+            min-width: 80px;
+        }
+        button:hover {
+            background: linear-gradient(to bottom, rgba(0, 255, 255, 0.4), rgba(0, 128, 255, 0.3));
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 255, 255, 0.3);
+        }
+        button:active {
+            transform: scale(0.95) translateY(0);
+        }
+        #wordInput {
+            width: 150px;
+            margin-right: 8px;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+        #sizeSlider {
+            width: 150px;
+            height: 6px;
+            -webkit-appearance: none;
+            background: linear-gradient(to right, #0066cc, #00ccff);
+            border-radius: 3px;
+            outline: none;
+            border: none;
+            cursor: pointer;
+        }
+        #sizeSlider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #ffffff;
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.8);
+            cursor: pointer;
+        }
+        #colorScheme {
+            background-color: rgba(0, 0, 0, 0.5);
+            width: 150px;
+        }
+        #instructions {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.2), inset 0 0 10px rgba(0, 128, 255, 0.1);
+            font-size: 14px;
+            max-width: 250px;
+            z-index: 10;
+            backdrop-filter: blur(5px);
+            transition: all 0.3s ease;
+        }
+        #instructions h3 {
+            margin-top: 0;
+            color: rgba(0, 255, 255, 1);
+            text-shadow: 0 0 5px rgba(0, 255, 255, 0.5);
+        }
+        #instructions p {
+            margin-bottom: 10px;
+            line-height: 1.4;
+        }
+        .hide-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.7);
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0;
+        }
+        .hide-btn:hover {
+            color: white;
+            text-shadow: 0 0 5px rgba(255, 255, 255, 0.8);
+        }
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            transition: opacity 0.5s ease;
+        }
+        #loading-spinner {
+            width: 60px;
+            height: 60px;
+            border: 5px solid rgba(0, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: rgba(0, 255, 255, 1);
+            animation: spin 1s ease-in-out infinite;
+            margin-bottom: 20px;
+        }
+        #loading-text {
+            color: white;
+            font-size: 18px;
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.8);
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .theme-toggle {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+        }
+        .theme-btn {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            margin-right: 10px;
+            cursor: pointer;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            transition: all 0.2s ease;
+        }
+        .theme-btn:hover {
+            transform: scale(1.2);
+            box-shadow: 0 0 15px currentColor;
+        }
+        .theme-btn.active {
+            border-color: white;
+            box-shadow: 0 0 10px white;
+        }
+        #theme-cosmic {
+            background: linear-gradient(135deg, #0a0a2a, #4b0082);
+        }
+        #theme-cyber {
+            background: linear-gradient(135deg, #000, #00ff99);
+        }
+        #theme-sunset {
+            background: linear-gradient(135deg, #ff3300, #ff9966);
+        }
+    */
     </style>
 </head>
 <body>
-    <div id="info">3D Word Cloud</div>
+    <!-- Loading overlay -->
+    <div id="loading-overlay">
+        <div id="loading-spinner"></div>
+        <div id="loading-text">Loading 3D Word Cloud...</div>
+    </div>
+
+    <div id="info">3D Word Cloud Visualization</div>
+    
+    <div class="theme-toggle">
+        <button class="theme-btn active" id="theme-cosmic" title="Cosmic Theme"></button>
+        <button class="theme-btn" id="theme-cyber" title="Cyber Theme"></button>
+        <button class="theme-btn" id="theme-sunset" title="Sunset Theme"></button>
+    </div>
+    
     <div id="controls">
-        <div>
-            <label for="wordInput">Add Word: </label>
-            <input type="text" id="wordInput">
+        <div class="control-row">
+            <label for="wordInput">Add Word:</label>
+            <input type="text" id="wordInput" placeholder="Type a word...">
             <button id="addWordBtn">Add</button>
         </div>
-        <div>
+        <div class="control-row">
+            <label for="sizeSlider">Word Size:</label>
+            <input type="range" id="sizeSlider" min="0.5" max="3" step="0.1" value="1.5">
+        </div>
+        <div class="control-row">
+            <label for="colorScheme">Color:</label>
+            <select id="colorScheme">
+                <option value="default">Default</option>
+                <option value="neon">Neon</option>
+                <option value="warm">Warm</option>
+                <option value="cool">Cool</option>
+                <option value="rainbow">Rainbow</option>
+                <option value="orange">Orange (3D Style)</option>
+            </select>
+        </div>
+        <div class="control-row">
             <button id="randomizeBtn">Randomize</button>
             <button id="resetBtn">Reset</button>
+            <button id="toggleRotationBtn">Pause Rotation</button>
         </div>
     </div>
     
-    <!-- Import Three.js from CDN -->
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://cdn.jsdelivr.net/npm/three@0.174.0/build/three.module.js",
-                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/"
-            }
-        }
-    </script>
-    <script type="module" src="wordcloud.js"></script>
+    <div id="instructions">
+        <button class="hide-btn" id="hideInstructions">×</button>
+        <h3>Instructions</h3>
+        <p>• <strong>Drag</strong> to rotate the view</p>
+        <p>• <strong>Scroll</strong> to zoom in/out</p>
+        <p>• <strong>Click</strong> on a word to select it</p>
+        <p>• Add your own words using the input field</p>
+        <p>• Experiment with different color schemes</p>
+        <p>• Adjust word size with the slider</p>
+    </div>
     
-    <!-- Our custom JavaScript is imported as a module above -->
+    <!-- Import Three.js from CDN -->
+    <script type="module" src="wordcloud.js"></script>
+    <script>
+        // Handle the loading overlay
+        window.addEventListener('load', function() {
+            // Give a little extra time for Three.js to initialize
+            setTimeout(function() {
+                const loadingOverlay = document.getElementById('loading-overlay');
+                if (loadingOverlay) {
+                    loadingOverlay.style.opacity = '0';
+                    setTimeout(function() {
+                        loadingOverlay.style.display = 'none';
+                    }, 500);
+                }
+            }, 1000);
+        });
+        
+        // Theme toggle functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const themeButtons = document.querySelectorAll('.theme-btn');
+            const body = document.body;
+            
+            themeButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    // Remove active class from all buttons
+                    themeButtons.forEach(btn => btn.classList.remove('active'));
+                    // Add active class to clicked button
+                    this.classList.add('active');
+                    
+                    // Apply theme
+                    if (this.id === 'theme-cosmic') {
+                        body.style.background = 'linear-gradient(135deg, #000000, #0a0a2a)';
+                    } else if (this.id === 'theme-cyber') {
+                        body.style.background = 'linear-gradient(135deg, #000000, #003300)';
+                    } else if (this.id === 'theme-sunset') {
+                        body.style.background = 'linear-gradient(135deg, #330000, #331100)';
+                    }
+                });
+            });
+        });
+    </script>
 </body>
 </html>

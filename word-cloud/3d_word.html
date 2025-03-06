@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3D Leeway Text</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/FontLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/TextGeometry.js"></script>
+
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const pointLight = new THREE.PointLight(0xffffff, 1);
+        pointLight.position.set(25, 50, 25);
+        scene.add(pointLight);
+
+        // Camera position
+        camera.position.z = 50;
+
+        // Load font and create text
+        const loader = new THREE.FontLoader();
+        loader.load('https://unpkg.com/three@0.132.2/examples/fonts/helvetiker_regular.typeface.json', function(font) {
+            const textGeometry = new THREE.TextGeometry('leeway', {
+                font: font,
+                size: 5,
+                height: 2,
+                curveSegments: 12,
+                bevelEnabled: true,
+                bevelThickness: 0.5,
+                bevelSize: 0.3,
+                bevelOffset: 0,
+                bevelSegments: 5
+            });
+
+            // Center the text
+            textGeometry.center();
+
+            // Create material
+            const textMaterial = new THREE.MeshPhongMaterial({
+                color: 0xff8800,
+                specular: 0xffffff,
+                shininess: 100
+            });
+
+            // Create mesh
+            const textMesh = new THREE.Mesh(textGeometry, textMaterial);
+            scene.add(textMesh);
+
+            // Animation
+            function animate() {
+                requestAnimationFrame(animate);
+
+                // Rotate text
+                textMesh.rotation.x += 0.005;
+                textMesh.rotation.y += 0.01;
+
+                renderer.render(scene, camera);
+            }
+            animate();
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', onWindowResize, false);
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+    </script>
+</body>
+</html>

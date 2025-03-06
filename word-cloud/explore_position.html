@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>explore positions</title>
+    <style>
+      body { margin: 0; }
+    </style>
+    <!-- if you installed three.js node package, the below can be ignored -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.174/build/three.module.js",
+        }
+      }
+    </script>
+
+  </head>
+  <body>
+  
+  </body>
+  <script type="module">
+import * as THREE from 'three';
+
+// Scene setup
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+// initial position for the eye(camera)
+// facing -Z direction with distance 6 off the origin
+camera.position.set(0, 0, 6);
+// good position view for 3d object
+// camera.position.set(0.6, 0.4, 6);
+
+// Display camera position
+const info = document.createElement('div');
+info.style.position = 'absolute';
+info.style.top = '10px';
+info.style.left = '10px';
+info.style.color = 'white';
+info.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+info.style.padding = '5px';
+document.body.appendChild(info);
+
+function updateInfo() {
+    info.innerHTML = `Camera Position: x=${camera.position.x.toFixed(2)}, y=${camera.position.y.toFixed(2)}, z=${camera.position.z.toFixed(2)}<br>`
+                    + `Light Position: x=${light.position.x.toFixed(2)}, y=${light.position.y.toFixed(2)}, z=${light.position.z.toFixed(2)}`;
+}
+
+const renderer = new THREE.WebGLRenderer();
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setAnimationLoop(animate);
+document.body.appendChild(renderer.domElement);
+
+// Add AxesHelper
+const axesHelper = new THREE.AxesHelper(100);
+scene.add(axesHelper);
+
+// Add a simple 3D object (cube)
+const geometry = new THREE.BoxGeometry();
+// If you want full brightness, try MeshBasicMaterial (it doesn’t depend on light)
+// const material = new THREE.MeshBasicMaterial({ color: 0xaabbcc });
+const material = new THREE.MeshStandardMaterial({ 
+    color: 0xffffff, 
+    metalness: 0.3,  // Slight metallic effect
+    roughness: 0.2   // Makes it shinier
+});
+
+const cube = new THREE.Mesh(geometry, material);
+// place the cube at the center of this 3d world
+cube.position.set(0, 0, 0);
+// make it seen as a 3d object
+cube.rotation.set(0, 0, 0);
+scene.add(cube);
+
+// Lighting setup
+// * use a red light source
+// * with intensity of 6
+// * and decay distance 50
+const light = new THREE.PointLight(0xff0000, 6, 50);
+// light source initial position
+// facing -Z direction with distance 2
+light.position.set(0, 0, 2);
+scene.add(light);
+
+// Controls for camera and light
+window.addEventListener('keydown', (event) => {
+    const speed = 0.2;
+    console.log(event.key);
+    switch (event.key) {
+        // Camera movement
+        case 'w': camera.position.z -= speed; break; // Move forward
+        case 's': camera.position.z += speed; break; // Move backward
+        case 'a': camera.position.x -= speed; break; // Move left
+        case 'd': camera.position.x += speed; break; // Move right
+        case 'q': camera.position.y += speed; break; // Move up
+        case 'e': camera.position.y -= speed; break; // Move down
+
+        // cube rotation
+        case 'r': cube.rotation.y += Math.PI / 8; break;
+        case 'z': cube.rotation.z += Math.PI / 8; break;
+        case 'x': cube.rotation.x += Math.PI / 8; break;
+
+        // Light movement
+        case 'ArrowUp': light.position.z -= speed; break;
+        case 'ArrowDown': light.position.z += speed; break;
+        case 'h': light.position.x -= speed; break;
+        case 'l': light.position.x += speed; break;
+        case 'k': light.position.y += speed; break;
+        case 'j': light.position.y -= speed; break;
+    }
+});
+
+// Animation loop
+function animate() {
+    renderer.render(scene, camera);
+    updateInfo();
+}
+  </script>
+</html>

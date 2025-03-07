@@ -23,12 +23,15 @@
   <script type="module">
 import * as THREE from 'three';
 
+import { FontLoader } from 'three/addons/loaders/FontLoader.js';
+import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
+
 // Scene setup
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 // initial position for the eye(camera)
 // facing -Z direction with distance 6 off the origin
-camera.position.set(0, 0, 6);
+camera.position.set(0, 0, 60);
 // good position view for 3d object
 // camera.position.set(0.6, 0.4, 6);
 
@@ -44,43 +47,79 @@ document.body.appendChild(info);
 
 function updateInfo() {
     info.innerHTML = `Camera Position: x=${camera.position.x.toFixed(2)}, y=${camera.position.y.toFixed(2)}, z=${camera.position.z.toFixed(2)}<br>`
-                    + `Light Position: x=${light.position.x.toFixed(2)}, y=${light.position.y.toFixed(2)}, z=${light.position.z.toFixed(2)}`;
+                    + `Light Position: x=${light.position.x.toFixed(2)}, y=${light.position.y.toFixed(2)}, z=${light.position.z.toFixed(2)}<br>`
+                    + `text position: x=${textMesh1.position.x.toFixed(2)},y=${textMesh1.position.y.toFixed(2)},z=${textMesh1.position.z.toFixed(2)}`;
 }
 
 const renderer = new THREE.WebGLRenderer();
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setAnimationLoop(animate);
 document.body.appendChild(renderer.domElement);
 
 // Add AxesHelper
 const axesHelper = new THREE.AxesHelper(100);
 scene.add(axesHelper);
 
-// Add a simple 3D object (cube)
-const geometry = new THREE.BoxGeometry();
-// If you want full brightness, try MeshBasicMaterial (it doesn’t depend on light)
-// const material = new THREE.MeshBasicMaterial({ color: 0xaabbcc });
-const material = new THREE.MeshStandardMaterial({ 
-    color: 0xffffff, 
-    metalness: 0.3,  // Slight metallic effect
-    roughness: 0.2   // Makes it shinier
-});
+let fontLoader = new FontLoader();
+let textGeo, textMesh1;
+fontLoader.load('/fonts/helvetiker_regular.typeface.json', function(font) {
+    const fontSize = 10;
+    textGeo = new TextGeometry("leeway", {
 
-const cube = new THREE.Mesh(geometry, material);
-// place the cube at the center of this 3d world
-cube.position.set(0, 0, 0);
-// make it seen as a 3d object
-cube.rotation.set(0, 0, 0);
-scene.add(cube);
+        font: font,
+
+        // related with font 'em square'
+        // this is a big size, so the camera position should be far from the
+        // origin to see the font.
+        size: fontSize,
+        depth: 4, // thickness
+        curveSegments: 4,
+    });
+
+    textGeo.computeBoundingBox();
+
+    // let materials = new THREE.MeshPhongMaterial({ color: 0xffffff, flatShading: true });
+    let materials = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true });
+    textMesh1 = new THREE.Mesh(textGeo, materials);
+
+    textMesh1.position.x = -fontSize * 2.5;
+    textMesh1.position.y = 0;
+    textMesh1.position.z = 0;
+
+    textMesh1.rotation.x = 0;
+    textMesh1.rotation.y = 0;
+
+    scene.add(textMesh1);
+
+    renderer.setAnimationLoop(animate);
+});
+// // Add a simple 3D object (cube)
+// const geometry = new THREE.BoxGeometry();
+// // If you want full brightness, try MeshBasicMaterial (it doesn’t depend on light)
+// // const material = new THREE.MeshBasicMaterial({ color: 0xaabbcc });
+// const material = new THREE.MeshStandardMaterial({ 
+//     color: 0xffffff, 
+//     metalness: 0.3,  // Slight metallic effect
+//     roughness: 0.2   // Makes it shinier
+// });
+//
+// const cube = new THREE.Mesh(geometry, material);
+// // place the cube at the center of this 3d world
+// cube.position.set(0, 0, 0);
+// // make it seen as a 3d object
+// cube.rotation.set(0, 0, 0);
+// scene.add(cube);
 
 // Lighting setup
 // * use a red light source
 // * with intensity of 6
-// * and range distance 50
-const light = new THREE.PointLight(0xff0000, 6, 50);
+// * and range distance, 0 is no limit
+// * and decay effect, 0 is no decay, i.e., I can see the
+//   object at any distancand decay effect, 0 is no decay, i.e., I can see the
+//   object at any distance.
+const light = new THREE.PointLight(0xff0000, 6, 0, 0);
 // light source initial position
 // facing -Z direction with distance 2
-light.position.set(0, 0, 2);
+light.position.set(0, 0, 50);
 scene.add(light);
 
 // Controls for camera and light
@@ -97,9 +136,12 @@ window.addEventListener('keydown', (event) => {
         case 'e': camera.position.y -= speed; break; // Move down
 
         // cube rotation
-        case 'r': cube.rotation.y += Math.PI / 8; break;
-        case 'z': cube.rotation.z += Math.PI / 8; break;
-        case 'x': cube.rotation.x += Math.PI / 8; break;
+        case 'r': textMesh1.rotation.y += Math.PI / 8; break;
+        case 'R': textMesh1.rotation.y -= Math.PI / 8; break;
+        case 'z': textMesh1.rotation.z += Math.PI / 8; break;
+        case 'Z': textMesh1.rotation.z -= Math.PI / 8; break;
+        case 'x': textMesh1.rotation.x += Math.PI / 8; break;
+        case 'X': textMesh1.rotation.x -= Math.PI / 8; break;
 
         // Light movement
         case 'ArrowUp': light.position.z -= speed; break;

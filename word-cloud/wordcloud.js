@@ -25,7 +25,7 @@ const depth = 20,
 
     curveSegments = 4,
 
-    bevelThickness = 2,
+    bevelThickness = 16,
     bevelSize = 1.5;
 
 const reverseFontMap = [];

@@ -1,6 +1,4 @@
 import * as THREE from 'three';
-import { FontLoader } from 'three/addons/loaders/FontLoader.js';
-import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // Default words to display
@@ -31,9 +29,12 @@ class WordCloud {
     constructor(container, words = defaultWords) {
         this.container = container;
         this.words = words;
-        this.textMeshes = [];
-        this.fontLoaded = false;
-        this.font = null;
+        this.nodeMeshes = [];
+        this.connections = [];
+        this.labels = [];
+        this.animationEnabled = true;
+        this.animationFrameId = null;
+        this.showLabels = true;
         
         this.init();
     }
@@ -85,27 +86,40 @@ class WordCloud {
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
         
-        // Load font
-        const fontLoader = new FontLoader();
-        fontLoader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', (font) => {
-            this.font = font;
-            this.fontLoaded = true;
-            this.createWordCloud();
-        });
+        // Create word cloud
+        this.createWordCloud();
         
         // Handle window resize
         window.addEventListener('resize', this.onWindowResize.bind(this));
+        
+        // Create CSS2D renderer for labels
+        this.labelRenderer = new CSS2DRenderer();
+        this.labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        this.labelRenderer.domElement.style.position = 'absolute';
+        this.labelRenderer.domElement.style.top = '0';
+        this.labelRenderer.domElement.style.pointerEvents = 'none';
+        this.container.appendChild(this.labelRenderer.domElement);
         
         // Start animation loop
         this.animate();
     }
     
     createWordCloud() {
-        if (!this.fontLoaded) return;
-        
         // Clear existing meshes
-        this.textMeshes.forEach(mesh => this.scene.remove(mesh));
-        this.textMeshes = [];
+        this.nodeMeshes.forEach(mesh => this.scene.remove(mesh));
+        this.nodeMeshes = [];
+        
+        // Clear existing connections
+        this.connections.forEach(line => this.scene.remove(line));
+        this.connections = [];
+        
+        // Clear existing labels
+        this.labels.forEach(label => {
+            if (label.element.parentNode) {
+                label.element.parentNode.removeChild(label.element);
+            }
+        });
+        this.labels = [];
         
         // Sort words by weight (descending)
         const sortedWords = [...this.words].sort((a, b) => b.weight - a.weight);
@@ -115,30 +129,13 @@ class WordCloud {
         const minWeight = Math.min(...sortedWords.map(word => word.weight));
         const weightRange = maxWeight - minWeight;
         
-        // Create text meshes
+        // Create node meshes
+        const nodePositions = [];
+        const sphereGeometry = new THREE.SphereGeometry(1, 32, 32);
+        
         sortedWords.forEach((word, index) => {
             // Scale size based on weight
-            const size = 3 + ((word.weight - minWeight) / weightRange) * 7;
-            const depth = size * 0.2;
-            
-            // Create text geometry
-            const textGeometry = new TextGeometry(word.text, {
-                font: this.font,
-                size: size,
-                depth: depth,
-                curveSegments: 5,
-                bevelEnabled: true,
-                bevelThickness: 0.5,
-                bevelSize: 0.2,
-                bevelOffset: 0,
-                bevelSegments: 3
-            });
-            
-            // Center the geometry
-            textGeometry.computeBoundingBox();
-            const centerOffset = new THREE.Vector3();
-            textGeometry.boundingBox.getCenter(centerOffset).negate();
-            textGeometry.translate(centerOffset.x, centerOffset.y, centerOffset.z);
+            const size = 1 + ((word.weight - minWeight) / weightRange) * 3;
             
             // Create material with unique color based on weight
             const hue = (index / sortedWords.length) * 0.8 + 0.1; // Avoid pure red (0) and pure blue (0.66)
@@ -153,84 +150,174 @@ class WordCloud {
             });
             
             // Create mesh
-            const textMesh = new THREE.Mesh(textGeometry, material);
+            const nodeMesh = new THREE.Mesh(sphereGeometry, material);
+            nodeMesh.scale.setScalar(size);
             
             // Position in 3D space using spherical distribution
             const phi = Math.acos(-1 + (2 * index) / sortedWords.length);
             const theta = Math.sqrt(sortedWords.length * Math.PI) * phi;
-            const radius = 40 + (Math.random() * 30);
+            const radius = 50;
             
-            textMesh.position.x = radius * Math.sin(phi) * Math.cos(theta);
-            textMesh.position.y = radius * Math.sin(phi) * Math.sin(theta);
-            textMesh.position.z = radius * Math.cos(phi);
-            
-            // Random rotation
-            textMesh.rotation.x = Math.random() * 0.3;
-            textMesh.rotation.y = Math.random() * 0.3;
+            nodeMesh.position.x = radius * Math.sin(phi) * Math.cos(theta);
+            nodeMesh.position.y = radius * Math.sin(phi) * Math.sin(theta);
+            nodeMesh.position.z = radius * Math.cos(phi);
             
             // Store original position for animation
-            textMesh.userData = {
-                originalPosition: textMesh.position.clone(),
-                originalRotation: textMesh.rotation.clone(),
+            nodeMesh.userData = {
+                originalPosition: nodeMesh.position.clone(),
                 animationPhase: Math.random() * Math.PI * 2,
                 animationSpeed: 0.5 + Math.random() * 0.5,
-                hoverScale: 1.0
+                hoverScale: 1.0,
+                word: word
             };
             
-            this.scene.add(textMesh);
-            this.textMeshes.push(textMesh);
+            this.scene.add(nodeMesh);
+            this.nodeMeshes.push(nodeMesh);
+            nodePositions.push(nodeMesh.position);
+            
+            // Create label for the node
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'node-label';
+            labelDiv.textContent = word.text;
+            labelDiv.style.color = 'white';
+            labelDiv.style.padding = '2px 6px';
+            labelDiv.style.borderRadius = '4px';
+            labelDiv.style.backgroundColor = 'rgba(0,0,0,0.6)';
+            labelDiv.style.fontSize = `${12 + (word.weight - minWeight) / weightRange * 6}px`;
+            labelDiv.style.pointerEvents = 'none';
+            labelDiv.style.transition = 'opacity 0.3s';
+            labelDiv.style.opacity = '0.8';
+            
+            const label = new CSS2DObject(labelDiv);
+            label.position.copy(nodeMesh.position);
+            this.scene.add(label);
+            this.labels.push(label);
+            nodeMesh.userData.label = label;
         });
+        
+        // Create connections between nodes (for the most important words)
+        const numConnections = Math.min(sortedWords.length * 2, 50); // Limit the number of connections
+        const lineMaterial = new THREE.LineBasicMaterial({ 
+            color: 0x4444aa, 
+            transparent: true, 
+            opacity: 0.3 
+        });
+        
+        for (let i = 0; i < numConnections; i++) {
+            // Connect random nodes, with higher probability for more important nodes
+            const sourceIndex = Math.floor(Math.pow(Math.random(), 2) * this.nodeMeshes.length);
+            let targetIndex;
+            do {
+                targetIndex = Math.floor(Math.pow(Math.random(), 2) * this.nodeMeshes.length);
+            } while (targetIndex === sourceIndex);
+            
+            const sourcePosition = this.nodeMeshes[sourceIndex].position;
+            const targetPosition = this.nodeMeshes[targetIndex].position;
+            
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+                sourcePosition,
+                targetPosition
+            ]);
+            
+            const line = new THREE.Line(lineGeometry, lineMaterial);
+            this.scene.add(line);
+            this.connections.push(line);
+        }
     }
     
     animate() {
-        requestAnimationFrame(this.animate.bind(this));
+        this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
         
         const time = Date.now() * 0.001;
         
-        // Animate each word
-        this.textMeshes.forEach(mesh => {
+        // Animate each node
+        this.nodeMeshes.forEach(mesh => {
             const data = mesh.userData;
             
-            // Gentle floating animation
-            const floatAmplitude = 0.5;
-            mesh.position.x = data.originalPosition.x + Math.sin(time * data.animationSpeed + data.animationPhase) * floatAmplitude;
-            mesh.position.y = data.originalPosition.y + Math.cos(time * data.animationSpeed + data.animationPhase) * floatAmplitude;
-            mesh.position.z = data.originalPosition.z + Math.sin(time * data.animationSpeed * 0.5 + data.animationPhase) * floatAmplitude;
-            
-            // Gentle rotation
-            mesh.rotation.x = data.originalRotation.x + Math.sin(time * 0.2) * 0.05;
-            mesh.rotation.y = data.originalRotation.y + Math.cos(time * 0.2) * 0.05;
+            // Gentle floating animation (only if animation is enabled)
+            if (this.animationEnabled) {
+                const floatAmplitude = 1.0;
+                mesh.position.x = data.originalPosition.x + Math.sin(time * data.animationSpeed + data.animationPhase) * floatAmplitude;
+                mesh.position.y = data.originalPosition.y + Math.cos(time * data.animationSpeed + data.animationPhase) * floatAmplitude;
+                mesh.position.z = data.originalPosition.z + Math.sin(time * data.animationSpeed * 0.5 + data.animationPhase) * floatAmplitude;
+                
+                // Update label position
+                if (data.label) {
+                    data.label.position.copy(mesh.position);
+                }
+            } else {
+                // When animation is paused, keep nodes at their original positions
+                mesh.position.copy(data.originalPosition);
+                
+                // Update label position
+                if (data.label) {
+                    data.label.position.copy(mesh.position);
+                }
+            }
             
             // Apply hover scale
-            mesh.scale.setScalar(data.hoverScale);
+            mesh.scale.setScalar(data.hoverScale * (1 + ((data.word.weight - Math.min(...this.words.map(w => w.weight))) / 
+                                                        (Math.max(...this.words.map(w => w.weight)) - Math.min(...this.words.map(w => w.weight)))) * 3));
             
             // Ease back to normal scale if needed
             if (data.hoverScale > 1.0) {
                 data.hoverScale = THREE.MathUtils.lerp(data.hoverScale, 1.0, 0.05);
+            }
+            
+            // Update label visibility based on camera distance
+            if (data.label && data.label.element) {
+                const distance = this.camera.position.distanceTo(mesh.position);
+                const opacity = this.showLabels ? Math.max(0, 1 - distance / 150) : 0;
+                data.label.element.style.opacity = opacity.toString();
+            }
+        });
+        
+        // Update connections to follow nodes
+        this.connections.forEach(line => {
+            const positions = line.geometry.attributes.position.array;
+            const sourceIndex = Math.floor(Math.random() * this.nodeMeshes.length);
+            const targetIndex = Math.floor(Math.random() * this.nodeMeshes.length);
+            
+            if (this.nodeMeshes[sourceIndex] && this.nodeMeshes[targetIndex]) {
+                positions[0] = this.nodeMeshes[sourceIndex].position.x;
+                positions[1] = this.nodeMeshes[sourceIndex].position.y;
+                positions[2] = this.nodeMeshes[sourceIndex].position.z;
+                
+                positions[3] = this.nodeMeshes[targetIndex].position.x;
+                positions[4] = this.nodeMeshes[targetIndex].position.y;
+                positions[5] = this.nodeMeshes[targetIndex].position.z;
+                
+                line.geometry.attributes.position.needsUpdate = true;
             }
         });
         
         // Update controls
         this.controls.update();
         
-        // Slowly rotate the entire cloud
-        this.scene.rotation.y += 0.001;
+        // Slowly rotate the entire cloud (only if animation is enabled)
+        if (this.animationEnabled) {
+            this.scene.rotation.y += 0.001;
+        }
         
         this.renderer.render(this.scene, this.camera);
+        if (this.labelRenderer) {
+            this.labelRenderer.render(this.scene, this.camera);
+        }
     }
     
     onWindowResize() {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(window.innerWidth, window.innerHeight);
+        if (this.labelRenderer) {
+            this.labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        }
     }
     
     // Method to update words
     updateWords(newWords) {
         this.words = newWords;
-        if (this.fontLoaded) {
-            this.createWordCloud();
-        }
+        this.createWordCloud();
     }
     
     // Add interactivity with raycasting
@@ -247,11 +334,14 @@ class WordCloud {
             this.raycaster.setFromCamera(this.mouse, this.camera);
             
             // Check for intersections
-            const intersects = this.raycaster.intersectObjects(this.textMeshes);
+            const intersects = this.raycaster.intersectObjects(this.nodeMeshes);
             
             // Reset all meshes
-            this.textMeshes.forEach(mesh => {
+            this.nodeMeshes.forEach(mesh => {
                 document.body.style.cursor = 'default';
+                if (mesh.userData.label && mesh.userData.label.element) {
+                    mesh.userData.label.element.style.backgroundColor = 'rgba(0,0,0,0.6)';
+                }
             });
             
             // Handle intersections
@@ -259,17 +349,23 @@ class WordCloud {
                 const mesh = intersects[0].object;
                 document.body.style.cursor = 'pointer';
                 mesh.userData.hoverScale = 1.2;
+                
+                // Highlight label
+                if (mesh.userData.label && mesh.userData.label.element) {
+                    mesh.userData.label.element.style.backgroundColor = 'rgba(100,100,255,0.8)';
+                    mesh.userData.label.element.style.opacity = '1';
+                }
             }
         });
         
         this.container.addEventListener('click', (event) => {
             this.raycaster.setFromCamera(this.mouse, this.camera);
-            const intersects = this.raycaster.intersectObjects(this.textMeshes);
+            const intersects = this.raycaster.intersectObjects(this.nodeMeshes);
             
             if (intersects.length > 0) {
                 const mesh = intersects[0].object;
                 // Find the word data
-                const wordIndex = this.textMeshes.indexOf(mesh);
+                const wordIndex = this.nodeMeshes.indexOf(mesh);
                 if (wordIndex >= 0) {
                     const word = this.words[wordIndex];
                     console.log(`Clicked on: ${word.text} (weight: ${word.weight})`);
@@ -278,6 +374,117 @@ class WordCloud {
             }
         });
     }
+    
+    // Method to toggle animation
+    toggleAnimation() {
+        this.animationEnabled = !this.animationEnabled;
+        return this.animationEnabled;
+    }
+    
+    // Method to toggle labels
+    toggleLabels() {
+        this.showLabels = !this.showLabels;
+        return this.showLabels;
+    }
 }
 
-export { WordCloud, defaultWords };
+// Create a CSS2D renderer for labels
+class CSS2DObject extends THREE.Object3D {
+    constructor(element) {
+        super();
+        this.element = element || document.createElement('div');
+        this.element.style.position = 'absolute';
+        this.element.style.userSelect = 'none';
+        
+        this.addEventListener('removed', () => {
+            if (this.element.parentNode) {
+                this.element.parentNode.removeChild(this.element);
+            }
+        });
+    }
+    
+    copy(source, recursive) {
+        super.copy(source, recursive);
+        this.element = source.element.cloneNode(true);
+        return this;
+    }
+}
+
+class CSS2DRenderer {
+    constructor() {
+        const container = document.createElement('div');
+        container.style.position = 'absolute';
+        container.style.top = '0';
+        container.style.pointerEvents = 'none';
+        
+        this.domElement = container;
+        this.cache = {
+            objects: new WeakMap()
+        };
+    }
+    
+    setSize(width, height) {
+        this.domElement.style.width = width + 'px';
+        this.domElement.style.height = height + 'px';
+    }
+    
+    render(scene, camera) {
+        const fov = camera.projectionMatrix.elements[5] * window.innerHeight / 2;
+        
+        // Clear existing objects
+        while (this.domElement.firstChild) {
+            this.domElement.removeChild(this.domElement.firstChild);
+        }
+        this.cache.objects = new WeakMap();
+        
+        // Find all CSS2DObjects in the scene
+        scene.traverse(object => {
+            if (object instanceof CSS2DObject) {
+                this.cache.objects.set(object, {
+                    object: object,
+                    element: object.element,
+                    visible: true
+                });
+                this.domElement.appendChild(object.element);
+            }
+        });
+        
+        const vector = new THREE.Vector3();
+        const viewMatrix = camera.matrixWorldInverse;
+        
+        // Get all objects from the scene that are CSS2DObjects
+        scene.traverse(object => {
+            if (object instanceof CSS2DObject) {
+                const data = this.cache.objects.get(object);
+                if (!data) return;
+                
+                if (object.parent === null) {
+                    data.visible = false;
+                    data.element.style.display = 'none';
+                    return;
+                }
+                
+                vector.setFromMatrixPosition(object.matrixWorld);
+                vector.applyMatrix4(viewMatrix);
+                
+                const visible = (vector.z > -1 && vector.z < 1);
+                
+                if (visible) {
+                    vector.applyMatrix4(camera.projectionMatrix);
+                    
+                    const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+                    const y = (1 - (vector.y * 0.5 + 0.5)) * window.innerHeight;
+                    
+                    data.element.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
+                    data.element.style.display = '';
+                } else {
+                    data.element.style.display = 'none';
+                }
+                
+                data.visible = visible;
+            }
+        });
+    }
+}
+
+export { WordCloud, defaultWords, CSS2DObject, CSS2DRenderer };

@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { FontLoader } from 'three/addons/loaders/FontLoader.js';
+import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 
 // Default words to display
 const defaultWords = [
@@ -30,45 +32,95 @@ class WordCloud {
         this.container = container;
         this.words = words;
         this.nodeMeshes = [];
-        this.connections = [];
-        this.labels = [];
         this.animationEnabled = true;
         this.animationFrameId = null;
-        this.showLabels = true;
+        this.font = null;
+        this.fontLoaded = false;
+        this.activeTextMesh = null;
+        this.cloudGroup = null;
+        this.textGroup = null;
+        
+        // Performance optimizations
+        this.sphereGeometry = new THREE.SphereGeometry(1, 12, 12); // Reduced segments
+        this.materialCache = new Map();
+        this.lastFrameTime = 0;
+        this.frameInterval = 1000 / 30; // 30 FPS target
+        this.lastAnimationUpdate = 0;
+        this.animationUpdateInterval = 50; // Update positions every 50ms
+        
+        // Raycasting optimization
+        this.lastRaycastTime = 0;
+        this.raycastThrottle = 100; // Increased throttle time
         
         this.init();
     }
     
     init() {
-        // Create scene
+        // Create main scene
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x111133);
         
-        // Create camera
+        // Create main camera
         this.camera = new THREE.PerspectiveCamera(
             60, 
             window.innerWidth / window.innerHeight, 
             0.1, 
             1000
         );
-        this.camera.position.z = 150;
+        this.camera.position.z = 200;
+        this.camera.position.y = 50;
+
+        // Create text scene and camera
+        this.textScene = new THREE.Scene();
+        this.textCamera = new THREE.PerspectiveCamera(
+            60,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            1000
+        );
+        this.textCamera.position.z = 100;
+        this.textCamera.position.y = 20; // Adjusted for better text view
         
         // Create renderer
-        this.renderer = new THREE.WebGLRenderer({ antialias: true });
+        this.renderer = new THREE.WebGLRenderer({ 
+            antialias: true,
+            powerPreference: "high-performance" // Prefer GPU over integrated graphics
+        });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio
+        this.renderer.autoClear = false;
         this.container.appendChild(this.renderer.domElement);
         
-        // Add ambient light
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-        this.scene.add(ambientLight);
+        // Create scene groups
+        this.cloudGroup = new THREE.Group();
+        this.textGroup = new THREE.Group();
         
-        // Add directional light
+        // Position the cloud group lower
+        this.cloudGroup.position.y = -30;
+        
+        // Position the text group higher
+        this.textGroup.position.y = 40;
+        
+        // Add groups to respective scenes
+        this.scene.add(this.cloudGroup);
+        this.textScene.add(this.textGroup);
+        
+        // Add ambient light to both scenes
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        this.scene.add(ambientLight.clone());
+        this.textScene.add(ambientLight.clone());
+        
+        // Add directional light for main scene
         const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
         directionalLight.position.set(1, 1, 1);
         this.scene.add(directionalLight);
         
-        // Add point lights for more dynamic lighting
+        // Add specific light for text scene
+        const textLight = new THREE.DirectionalLight(0x6666ff, 1);
+        textLight.position.set(0, 0, 1);
+        this.textScene.add(textLight);
+        
+        // Add point lights for globe
         const colors = [0xff5555, 0x55ff55, 0x5555ff];
         colors.forEach((color, i) => {
             const light = new THREE.PointLight(color, 1, 200);
@@ -78,7 +130,7 @@ class WordCloud {
                 Math.sin(angle) * 100,
                 50
             );
-            this.scene.add(light);
+            this.cloudGroup.add(light);
         });
         
         // Add controls
@@ -86,231 +138,223 @@ class WordCloud {
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
         
+        // Load font for 3D text
+        const fontLoader = new FontLoader();
+        fontLoader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', (font) => {
+            this.font = font;
+            this.fontLoaded = true;
+        });
+        
         // Create word cloud
         this.createWordCloud();
         
         // Handle window resize
         window.addEventListener('resize', this.onWindowResize.bind(this));
         
-        // Create CSS2D renderer for labels
-        this.labelRenderer = new CSS2DRenderer();
-        this.labelRenderer.setSize(window.innerWidth, window.innerHeight);
-        this.labelRenderer.domElement.style.position = 'absolute';
-        this.labelRenderer.domElement.style.top = '0';
-        this.labelRenderer.domElement.style.pointerEvents = 'none';
-        this.container.appendChild(this.labelRenderer.domElement);
-        
         // Start animation loop
         this.animate();
     }
     
     createWordCloud() {
-        // Clear existing meshes
-        this.nodeMeshes.forEach(mesh => this.scene.remove(mesh));
+        // Clear existing meshes and cache
+        this.nodeMeshes.forEach(mesh => this.cloudGroup.remove(mesh));
         this.nodeMeshes = [];
+        this.materialCache.clear();
         
-        // Clear existing connections
-        this.connections.forEach(line => this.scene.remove(line));
-        this.connections = [];
-        
-        // Clear existing labels
-        this.labels.forEach(label => {
-            if (label.element.parentNode) {
-                label.element.parentNode.removeChild(label.element);
-            }
-        });
-        this.labels = [];
-        
-        // Sort words by weight (descending)
+        // Optimize geometry creation
         const sortedWords = [...this.words].sort((a, b) => b.weight - a.weight);
-        
-        // Calculate the scaling factor for weights
-        const maxWeight = Math.max(...sortedWords.map(word => word.weight));
-        const minWeight = Math.min(...sortedWords.map(word => word.weight));
+        const maxWeight = Math.max(...sortedWords.map(w => w.weight));
+        const minWeight = Math.min(...sortedWords.map(w => w.weight));
         const weightRange = maxWeight - minWeight;
         
-        // Create node meshes
-        const nodePositions = [];
-        const sphereGeometry = new THREE.SphereGeometry(1, 32, 32);
-        
+        // Create node meshes with optimized materials
         sortedWords.forEach((word, index) => {
-            // Scale size based on weight
             const size = 1 + ((word.weight - minWeight) / weightRange) * 3;
             
-            // Create material with unique color based on weight
-            const hue = (index / sortedWords.length) * 0.8 + 0.1; // Avoid pure red (0) and pure blue (0.66)
-            const saturation = 0.7 + (word.weight / maxWeight) * 0.3;
-            const lightness = 0.5 + (word.weight / maxWeight) * 0.2;
+            // Calculate color values
+            const hue = (index / sortedWords.length) * 0.8 + 0.1;
+            const saturation = 0.7;
+            const lightness = 0.5;
             
-            const material = new THREE.MeshPhongMaterial({
-                color: new THREE.Color().setHSL(hue, saturation, lightness),
-                specular: 0xffffff,
-                shininess: 100,
-                emissive: new THREE.Color().setHSL(hue, saturation, lightness * 0.2)
-            });
+            // Create material
+            let material;
             
-            // Create mesh
-            const nodeMesh = new THREE.Mesh(sphereGeometry, material);
+            if (word.text == "leeway") {
+                material = new THREE.MeshPhongMaterial({
+                    color: new THREE.Color().setHex(0xff0000),
+                    shininess: 50, // Reduced for better performance
+                });
+            } else {
+                material = new THREE.MeshPhongMaterial({
+                    color: new THREE.Color().setHSL(hue, saturation, lightness),
+                    shininess: 50, // Reduced for better performance
+                    emissive: new THREE.Color().setHSL(hue, saturation * 0.7, lightness * 0.2)
+                });
+            }
+            
+            const nodeMesh = new THREE.Mesh(this.sphereGeometry, material);
             nodeMesh.scale.setScalar(size);
             
-            // Position in 3D space using spherical distribution
+            // Optimized position calculation
             const phi = Math.acos(-1 + (2 * index) / sortedWords.length);
             const theta = Math.sqrt(sortedWords.length * Math.PI) * phi;
-            const radius = 50;
+            const radius = 40;
             
-            nodeMesh.position.x = radius * Math.sin(phi) * Math.cos(theta);
-            nodeMesh.position.y = radius * Math.sin(phi) * Math.sin(theta);
-            nodeMesh.position.z = radius * Math.cos(phi);
+            nodeMesh.position.set(
+                radius * Math.sin(phi) * Math.cos(theta),
+                radius * Math.sin(phi) * Math.sin(theta) - 20,
+                radius * Math.cos(phi)
+            );
             
-            // Store original position for animation
+            // Store complete userData
             nodeMesh.userData = {
                 originalPosition: nodeMesh.position.clone(),
                 animationPhase: Math.random() * Math.PI * 2,
-                animationSpeed: 0.5 + Math.random() * 0.5,
-                hoverScale: 1.0,
-                word: word
+                animationSpeed: 0.5,
+                word: word,
+                originalColor: {
+                    hue: hue,
+                    saturation: saturation,
+                    lightness: lightness
+                }
             };
             
-            this.scene.add(nodeMesh);
+            this.cloudGroup.add(nodeMesh);
             this.nodeMeshes.push(nodeMesh);
-            nodePositions.push(nodeMesh.position);
-            
-            // Create label for the node
-            const labelDiv = document.createElement('div');
-            labelDiv.className = 'node-label';
-            labelDiv.textContent = word.text;
-            labelDiv.style.color = 'white';
-            labelDiv.style.padding = '2px 6px';
-            labelDiv.style.borderRadius = '4px';
-            labelDiv.style.backgroundColor = 'rgba(0,0,0,0.6)';
-            labelDiv.style.fontSize = `${12 + (word.weight - minWeight) / weightRange * 6}px`;
-            labelDiv.style.pointerEvents = 'none';
-            labelDiv.style.transition = 'opacity 0.3s';
-            labelDiv.style.opacity = '0.8';
-            
-            const label = new CSS2DObject(labelDiv);
-            label.position.copy(nodeMesh.position);
-            this.scene.add(label);
-            this.labels.push(label);
-            nodeMesh.userData.label = label;
         });
-        
-        // Create connections between nodes (for the most important words)
-        const numConnections = Math.min(sortedWords.length * 2, 50); // Limit the number of connections
-        const lineMaterial = new THREE.LineBasicMaterial({ 
-            color: 0x4444aa, 
-            transparent: true, 
-            opacity: 0.3 
-        });
-        
-        for (let i = 0; i < numConnections; i++) {
-            // Connect random nodes, with higher probability for more important nodes
-            const sourceIndex = Math.floor(Math.pow(Math.random(), 2) * this.nodeMeshes.length);
-            let targetIndex;
-            do {
-                targetIndex = Math.floor(Math.pow(Math.random(), 2) * this.nodeMeshes.length);
-            } while (targetIndex === sourceIndex);
-            
-            const sourcePosition = this.nodeMeshes[sourceIndex].position;
-            const targetPosition = this.nodeMeshes[targetIndex].position;
-            
-            const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-                sourcePosition,
-                targetPosition
-            ]);
-            
-            const line = new THREE.Line(lineGeometry, lineMaterial);
-            this.scene.add(line);
-            this.connections.push(line);
-        }
     }
     
     animate() {
         this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
         
-        const time = Date.now() * 0.001;
+        const currentTime = Date.now();
         
-        // Animate each node
-        this.nodeMeshes.forEach(mesh => {
-            const data = mesh.userData;
-            
-            // Gentle floating animation (only if animation is enabled)
-            if (this.animationEnabled) {
-                const floatAmplitude = 1.0;
-                mesh.position.x = data.originalPosition.x + Math.sin(time * data.animationSpeed + data.animationPhase) * floatAmplitude;
-                mesh.position.y = data.originalPosition.y + Math.cos(time * data.animationSpeed + data.animationPhase) * floatAmplitude;
-                mesh.position.z = data.originalPosition.z + Math.sin(time * data.animationSpeed * 0.5 + data.animationPhase) * floatAmplitude;
+        // Limit frame rate
+        if (currentTime - this.lastFrameTime < this.frameInterval) {
+            return;
+        }
+        this.lastFrameTime = currentTime;
+        
+        if (this.animationEnabled) {
+            // Only update positions periodically
+            if (currentTime - this.lastAnimationUpdate > this.animationUpdateInterval) {
+                this.lastAnimationUpdate = currentTime;
+                const time = currentTime * 0.001;
                 
-                // Update label position
-                if (data.label) {
-                    data.label.position.copy(mesh.position);
-                }
+                this.nodeMeshes.forEach((mesh) => {
+                    const data = mesh.userData;
+                    
+                    // Simplified floating animation with fewer calculations
+                    const floatAmplitude = 1.0;
+                    const phase = time * data.animationSpeed + data.animationPhase;
+                    mesh.position.x = data.originalPosition.x + Math.sin(phase) * floatAmplitude;
+                    mesh.position.y = data.originalPosition.y + Math.cos(phase) * floatAmplitude;
+                    mesh.position.z = data.originalPosition.z + Math.sin(phase * 0.5) * floatAmplitude;
+                });
+                
+                // Smoother rotation
+                this.cloudGroup.rotation.y += 0.01;
+            }
+        }
+        
+        // Optimize text animation
+        if (this.activeTextMesh) {
+            const data = this.activeTextMesh.userData;
+            const age = (currentTime - data.createdAt) * 0.001;
+            const animationDuration = 1.0;
+            
+            if (age < animationDuration) {
+                // Initial animation from source to center
+                const progress = age / animationDuration;
+                const eased = 1 - Math.pow(1 - progress, 3);
+                
+                // Move from source position to center of text group
+                const targetPosition = new THREE.Vector3(0, 0, 0);
+                this.activeTextMesh.position.lerpVectors(
+                    data.sourcePosition,
+                    targetPosition,
+                    eased
+                );
+                
+                // Also animate the z-position to create a "coming forward" effect
+                this.activeTextMesh.position.z = data.sourcePosition.z * (1 - eased);
+                
+                // Scale up from small to full size
+                const scale = 0.1 + 0.9 * eased;
+                this.activeTextMesh.scale.setScalar(scale);
             } else {
-                // When animation is paused, keep nodes at their original positions
-                mesh.position.copy(data.originalPosition);
+                // After initial animation, keep text centered in view
                 
-                // Update label position
-                if (data.label) {
-                    data.label.position.copy(mesh.position);
+                // Gentle floating animation
+                const floatY = Math.sin(currentTime * 0.001) * 0.5;
+                this.activeTextMesh.position.set(0, floatY, 0);
+                
+                // Check if text is too large for current viewport and adjust if needed
+                if (this.activeTextMesh && data.word) {
+                    const viewportHeight = this.getViewportHeightAtZ(0);
+                    const currentBoundingBox = new THREE.Box3().setFromObject(this.activeTextMesh);
+                    const textHeight = currentBoundingBox.max.y - currentBoundingBox.min.y;
+                    const textWidth = currentBoundingBox.max.x - currentBoundingBox.min.x;
+                    
+                    // If text is too large for viewport (with some margin), scale it down
+                    const maxAllowedHeight = viewportHeight * 0.7; // 70% of viewport height
+                    const maxAllowedWidth = viewportHeight * this.textCamera.aspect * 0.7; // 70% of viewport width
+                    
+                    if (textHeight > maxAllowedHeight || textWidth > maxAllowedWidth) {
+                        const scaleFactorHeight = maxAllowedHeight / textHeight;
+                        const scaleFactorWidth = maxAllowedWidth / textWidth;
+                        const scaleFactor = Math.min(scaleFactorHeight, scaleFactorWidth);
+                        
+                        // Apply scale if significantly different from current scale
+                        if (Math.abs(scaleFactor - this.activeTextMesh.scale.x) > 0.01) {
+                            this.activeTextMesh.scale.multiplyScalar(scaleFactor * 0.95); // 5% margin
+                        }
+                    }
                 }
             }
-            
-            // Apply hover scale
-            mesh.scale.setScalar(data.hoverScale * (1 + ((data.word.weight - Math.min(...this.words.map(w => w.weight))) / 
-                                                        (Math.max(...this.words.map(w => w.weight)) - Math.min(...this.words.map(w => w.weight)))) * 3));
-            
-            // Ease back to normal scale if needed
-            if (data.hoverScale > 1.0) {
-                data.hoverScale = THREE.MathUtils.lerp(data.hoverScale, 1.0, 0.05);
-            }
-            
-            // Update label visibility based on camera distance
-            if (data.label && data.label.element) {
-                const distance = this.camera.position.distanceTo(mesh.position);
-                const opacity = this.showLabels ? Math.max(0, 1 - distance / 150) : 0;
-                data.label.element.style.opacity = opacity.toString();
-            }
-        });
+        }
         
-        // Update connections to follow nodes
-        this.connections.forEach(line => {
-            const positions = line.geometry.attributes.position.array;
-            const sourceIndex = Math.floor(Math.random() * this.nodeMeshes.length);
-            const targetIndex = Math.floor(Math.random() * this.nodeMeshes.length);
-            
-            if (this.nodeMeshes[sourceIndex] && this.nodeMeshes[targetIndex]) {
-                positions[0] = this.nodeMeshes[sourceIndex].position.x;
-                positions[1] = this.nodeMeshes[sourceIndex].position.y;
-                positions[2] = this.nodeMeshes[sourceIndex].position.z;
-                
-                positions[3] = this.nodeMeshes[targetIndex].position.x;
-                positions[4] = this.nodeMeshes[targetIndex].position.y;
-                positions[5] = this.nodeMeshes[targetIndex].position.z;
-                
-                line.geometry.attributes.position.needsUpdate = true;
-            }
-        });
-        
-        // Update controls
+        // Update controls with damping
         this.controls.update();
         
-        // Slowly rotate the entire cloud (only if animation is enabled)
-        if (this.animationEnabled) {
-            this.scene.rotation.y += 0.001;
-        }
-        
+        // Batch rendering
+        this.renderer.clear();
         this.renderer.render(this.scene, this.camera);
-        if (this.labelRenderer) {
-            this.labelRenderer.render(this.scene, this.camera);
-        }
+        this.renderer.clearDepth();
+        this.renderer.render(this.textScene, this.textCamera);
     }
     
     onWindowResize() {
+        // Update main camera
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
+        
+        // Update text camera
+        this.textCamera.aspect = window.innerWidth / window.innerHeight;
+        this.textCamera.updateProjectionMatrix();
+        
+        // Update renderer
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        if (this.labelRenderer) {
-            this.labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        
+        // If there's active text, update its size to fit the new viewport
+        if (this.activeTextMesh && this.activeTextMesh.userData.word) {
+            // Get current text
+            const word = this.activeTextMesh.userData.word;
+            
+            // For resize, we want the text to stay centered rather than
+            // animating from the original source position again
+            const position = new THREE.Vector3(0, 0, 30); // Use a fixed position in front of camera
+            
+            // Remove and recreate with proper sizing for new viewport
+            this.removeWordText();
+            this.showWordText(word, position);
+            
+            // Skip the animation since we're just resizing
+            if (this.activeTextMesh) {
+                this.activeTextMesh.userData.createdAt = 0; // Force animation to complete immediately
+                this.activeTextMesh.position.set(0, 0, 0); // Center immediately
+                this.activeTextMesh.scale.setScalar(1); // Full scale immediately
+            }
         }
     }
     
@@ -326,53 +370,197 @@ class WordCloud {
         this.mouse = new THREE.Vector2();
         
         this.container.addEventListener('mousemove', (event) => {
-            // Calculate mouse position in normalized device coordinates
+            // Throttle raycasting
+            const now = Date.now();
+            if (now - this.lastRaycastTime < this.raycastThrottle) return;
+            this.lastRaycastTime = now;
+            
             this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
             this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
             
-            // Update the raycaster
             this.raycaster.setFromCamera(this.mouse, this.camera);
-            
-            // Check for intersections
             const intersects = this.raycaster.intersectObjects(this.nodeMeshes);
             
-            // Reset all meshes
-            this.nodeMeshes.forEach(mesh => {
-                document.body.style.cursor = 'default';
-                if (mesh.userData.label && mesh.userData.label.element) {
-                    mesh.userData.label.element.style.backgroundColor = 'rgba(0,0,0,0.6)';
-                }
-            });
+            // Reset cursor
+            document.body.style.cursor = 'default';
             
             // Handle intersections
             if (intersects.length > 0) {
                 const mesh = intersects[0].object;
                 document.body.style.cursor = 'pointer';
-                mesh.userData.hoverScale = 1.2;
-                
-                // Highlight label
-                if (mesh.userData.label && mesh.userData.label.element) {
-                    mesh.userData.label.element.style.backgroundColor = 'rgba(100,100,255,0.8)';
-                    mesh.userData.label.element.style.opacity = '1';
-                }
             }
         });
         
         this.container.addEventListener('click', (event) => {
+            this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            
             this.raycaster.setFromCamera(this.mouse, this.camera);
             const intersects = this.raycaster.intersectObjects(this.nodeMeshes);
             
             if (intersects.length > 0) {
                 const mesh = intersects[0].object;
-                // Find the word data
-                const wordIndex = this.nodeMeshes.indexOf(mesh);
-                if (wordIndex >= 0) {
-                    const word = this.words[wordIndex];
-                    console.log(`Clicked on: ${word.text} (weight: ${word.weight})`);
-                    // You could trigger an event or callback here
-                }
+                const wordData = mesh.userData.word;
+                
+                // Stop rotation when a word is clicked
+                this.animationEnabled = false;
+                
+                // Show the word text in 3D space
+                this.showWordText(wordData, mesh.position.clone());
+            } else {
+                // Resume rotation when clicking empty space
+                this.animationEnabled = true;
+                
+                // Remove word text
+                this.removeWordText();
             }
         });
+    }
+    
+    showWordText(word, position) {
+        if (!this.fontLoaded) return;
+        
+        this.removeWordText();
+        
+        // Make spheres semi-transparent without changing colors
+        this.nodeMeshes.forEach(mesh => {
+            mesh.material.transparent = true;
+            mesh.material.opacity = 0.3;
+        });
+        
+        // Calculate a base size that considers both word weight and viewport dimensions
+        const maxWeight = Math.max(...this.words.map(w => w.weight));
+        const weightFactor = word.weight / maxWeight;
+        
+        // Get viewport dimensions in 3D units at the text position
+        // This helps scale text appropriately for different screen sizes
+        const viewportHeight = this.getViewportHeightAtZ(0); // At z=0 where text will be displayed
+        
+        // Adjust size based on text length - longer text should be smaller
+        const lengthFactor = Math.max(0.5, 1 - (word.text.length / 20)); // Reduce size for longer words
+        
+        // Calculate final size considering all factors
+        const size = Math.min(
+            viewportHeight * 0.15, // Max 15% of viewport height
+            (3 + weightFactor * 5) * lengthFactor
+        );
+        
+        // Create text geometry with adjusted size
+        const textGeometry = new TextGeometry(word.text, {
+            font: this.font,
+            size: size,
+            depth: size * 0.2,
+            curveSegments: 8,
+            bevelEnabled: true,
+            bevelThickness: 0.2,
+            bevelSize: 0.1,
+            bevelOffset: 0,
+            bevelSegments: 3
+        });
+        
+        // Center the geometry
+        textGeometry.computeBoundingBox();
+        const centerOffset = new THREE.Vector3();
+        textGeometry.boundingBox.getCenter(centerOffset).negate();
+        textGeometry.translate(centerOffset.x, centerOffset.y, centerOffset.z);
+        
+        // Create material with enhanced visual effects
+        const material = new THREE.MeshPhongMaterial({
+            color: 0x6666ff,
+            specular: 0xffffff,
+            shininess: 100,
+            emissive: 0x2222aa,
+            transparent: true,
+            opacity: 0.9
+        });
+        
+        // Create mesh
+        const textMesh = new THREE.Mesh(textGeometry, material);
+        
+        // Convert the clicked sphere position from main scene to text scene coordinates
+        // We need to account for the different group positions and camera setups
+        const sourcePosition = this.convertPositionToTextScene(position);
+        
+        // Add entrance animation data
+        textMesh.userData = {
+            animationPhase: Math.random() * Math.PI * 2,
+            createdAt: Date.now(),
+            sourcePosition: sourcePosition,
+            word: word // Store word data for potential use
+        };
+        
+        // Start position
+        textMesh.position.copy(textMesh.userData.sourcePosition);
+        textMesh.scale.set(0.1, 0.1, 0.1);
+        
+        // Add text mesh to text scene
+        this.textGroup.add(textMesh);
+        this.activeTextMesh = textMesh;
+    }
+    
+    // Helper method to convert a position from the main scene to the text scene
+    convertPositionToTextScene(mainScenePosition) {
+        // Create a copy of the position to avoid modifying the original
+        const position = mainScenePosition.clone();
+        
+        // Account for the cloudGroup's position offset
+        position.y += this.cloudGroup.position.y;
+        
+        // Project the position to screen coordinates
+        const screenPosition = position.clone().project(this.camera);
+        
+        // Convert screen position back to 3D coordinates in the text scene
+        const textScenePosition = new THREE.Vector3(
+            screenPosition.x,
+            screenPosition.y,
+            0 // We want the text to appear at z=0 in the text scene
+        ).unproject(this.textCamera);
+        
+        // Adjust for the text group's position
+        textScenePosition.y -= this.textGroup.position.y;
+        
+        // Add some depth offset to ensure the text starts slightly behind
+        // where it will end up (for a more dramatic entrance)
+        textScenePosition.z = 30;
+        
+        return textScenePosition;
+    }
+    
+    // Helper method to calculate viewport height in world units at a given Z position
+    getViewportHeightAtZ(z) {
+        // Get the camera's field of view in radians
+        const fovRadians = this.textCamera.fov * Math.PI / 180;
+        
+        // Calculate the distance from camera to the z plane
+        const distance = Math.abs(this.textCamera.position.z - z);
+        
+        // Calculate viewport height using trigonometry
+        return 2 * Math.tan(fovRadians / 2) * distance;
+    }
+
+    removeWordText() {
+        if (this.activeTextMesh) {
+            this.textGroup.remove(this.activeTextMesh);
+            this.activeTextMesh = null;
+            
+            // Restore sphere colors and opacity
+            this.nodeMeshes.forEach(mesh => {
+                const material = mesh.material;
+                const colorData = mesh.userData.originalColor;
+                
+                if (mesh.userData.word.text === "leeway") {
+                    material.color.setHex(0xff0000);
+                    material.emissive.setHex(0x000000);
+                } else if (colorData) {
+                    // Restore original colors from userData
+                    material.color.setHSL(colorData.hue, colorData.saturation, colorData.lightness);
+                    material.emissive.setHSL(colorData.hue, colorData.saturation * 0.7, colorData.lightness * 0.2);
+                }
+                
+                material.opacity = 1;
+                material.transparent = false;
+            });
+        }
     }
     
     // Method to toggle animation
@@ -380,111 +568,6 @@ class WordCloud {
         this.animationEnabled = !this.animationEnabled;
         return this.animationEnabled;
     }
-    
-    // Method to toggle labels
-    toggleLabels() {
-        this.showLabels = !this.showLabels;
-        return this.showLabels;
-    }
 }
 
-// Create a CSS2D renderer for labels
-class CSS2DObject extends THREE.Object3D {
-    constructor(element) {
-        super();
-        this.element = element || document.createElement('div');
-        this.element.style.position = 'absolute';
-        this.element.style.userSelect = 'none';
-        
-        this.addEventListener('removed', () => {
-            if (this.element.parentNode) {
-                this.element.parentNode.removeChild(this.element);
-            }
-        });
-    }
-    
-    copy(source, recursive) {
-        super.copy(source, recursive);
-        this.element = source.element.cloneNode(true);
-        return this;
-    }
-}
-
-class CSS2DRenderer {
-    constructor() {
-        const container = document.createElement('div');
-        container.style.position = 'absolute';
-        container.style.top = '0';
-        container.style.pointerEvents = 'none';
-        
-        this.domElement = container;
-        this.cache = {
-            objects: new WeakMap()
-        };
-    }
-    
-    setSize(width, height) {
-        this.domElement.style.width = width + 'px';
-        this.domElement.style.height = height + 'px';
-    }
-    
-    render(scene, camera) {
-        const fov = camera.projectionMatrix.elements[5] * window.innerHeight / 2;
-        
-        // Clear existing objects
-        while (this.domElement.firstChild) {
-            this.domElement.removeChild(this.domElement.firstChild);
-        }
-        this.cache.objects = new WeakMap();
-        
-        // Find all CSS2DObjects in the scene
-        scene.traverse(object => {
-            if (object instanceof CSS2DObject) {
-                this.cache.objects.set(object, {
-                    object: object,
-                    element: object.element,
-                    visible: true
-                });
-                this.domElement.appendChild(object.element);
-            }
-        });
-        
-        const vector = new THREE.Vector3();
-        const viewMatrix = camera.matrixWorldInverse;
-        
-        // Get all objects from the scene that are CSS2DObjects
-        scene.traverse(object => {
-            if (object instanceof CSS2DObject) {
-                const data = this.cache.objects.get(object);
-                if (!data) return;
-                
-                if (object.parent === null) {
-                    data.visible = false;
-                    data.element.style.display = 'none';
-                    return;
-                }
-                
-                vector.setFromMatrixPosition(object.matrixWorld);
-                vector.applyMatrix4(viewMatrix);
-                
-                const visible = (vector.z > -1 && vector.z < 1);
-                
-                if (visible) {
-                    vector.applyMatrix4(camera.projectionMatrix);
-                    
-                    const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
-                    const y = (1 - (vector.y * 0.5 + 0.5)) * window.innerHeight;
-                    
-                    data.element.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
-                    data.element.style.display = '';
-                } else {
-                    data.element.style.display = 'none';
-                }
-                
-                data.visible = visible;
-            }
-        });
-    }
-}
-
-export { WordCloud, defaultWords, CSS2DObject, CSS2DRenderer };
+export { WordCloud, defaultWords };

@@ -2,10 +2,6 @@ import { WordCloud, defaultWords } from './wordcloud.js';
 
 // DOM elements
 const container = document.getElementById('container');
-const defaultWordsBtn = document.getElementById('defaultWords');
-const customWordsBtn = document.getElementById('customWords');
-const toggleAnimationBtn = document.getElementById('toggleAnimation');
-const toggleLabelsBtn = document.getElementById('toggleLabels');
 
 // Initialize with default words
 let wordCloud = new WordCloud(container);
@@ -36,27 +32,6 @@ async function loadCustomWords() {
         // If there's an error, we'll keep the default words
     }
 }
-
-// Button event listeners
-defaultWordsBtn.addEventListener('click', () => {
-    wordCloud.updateWords(defaultWords);
-});
-
-customWordsBtn.addEventListener('click', loadCustomWords);
-
-// Toggle animation
-toggleAnimationBtn.addEventListener('click', () => {
-    const isEnabled = wordCloud.toggleAnimation();
-    toggleAnimationBtn.textContent = `Animation: ${isEnabled ? 'ON' : 'OFF'}`;
-    toggleAnimationBtn.classList.toggle('active', isEnabled);
-});
-
-// Toggle labels
-toggleLabelsBtn.addEventListener('click', () => {
-    const isEnabled = wordCloud.toggleLabels();
-    toggleLabelsBtn.textContent = `Labels: ${isEnabled ? 'ON' : 'OFF'}`;
-    toggleLabelsBtn.classList.toggle('active', isEnabled);
-});
 
 // Load custom words automatically when the page loads
 document.addEventListener('DOMContentLoaded', loadCustomWords); 
